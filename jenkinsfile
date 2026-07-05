@@ -1,0 +1,183 @@
+pipeline {
+    agent any
+
+    options {
+        timestamps()
+        ansiColor('xterm')
+        buildDiscarder(logRotator(numToKeepStr: '20'))
+    }
+
+    environment {
+
+        // Docker Hub
+        DOCKERHUB_USERNAME = "your-dockerhub-username"
+        IMAGE_NAME = "cicd-flask-app"
+
+        // AWS EC2
+        EC2_HOST = "YOUR_EC2_PUBLIC_IP"
+        EC2_USER = "ubuntu"
+
+        // Jenkins Credentials
+        DOCKER_CREDENTIALS = credentials('dockerhub-credentials')
+        SSH_CREDENTIALS = 'aws-ec2-ssh'
+
+        // Application
+        CONTAINER_NAME = "cicd-flask-app"
+        APP_PORT = "5000"
+    }
+
+    stages {
+
+        stage('Checkout Source') {
+            steps {
+                echo "Checking out source code..."
+                checkout scm
+            }
+        }
+
+        stage('Display Build Information') {
+            steps {
+                sh '''
+                    echo "Build Number : ${BUILD_NUMBER}"
+                    echo "Branch       : ${BRANCH_NAME}"
+                    echo "Commit       : ${GIT_COMMIT}"
+                '''
+            }
+        }
+
+        stage('Install Dependencies') {
+            steps {
+                sh '''
+                    python3 -m pip install --upgrade pip
+                    pip3 install -r requirements.txt
+                '''
+            }
+        }
+
+        stage('Run Tests') {
+            steps {
+                sh '''
+                    echo "Running tests..."
+                    python3 -m py_compile app.py
+                '''
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                sh """
+                docker build \
+                -t ${DOCKERHUB_USERNAME}/${IMAGE_NAME}:${BUILD_NUMBER} \
+                -t ${DOCKERHUB_USERNAME}/${IMAGE_NAME}:latest .
+                """
+            }
+        }
+
+        stage('Docker Login') {
+            steps {
+                sh """
+                echo ${DOCKER_CREDENTIALS_PSW} | docker login \
+                -u ${DOCKER_CREDENTIALS_USR} \
+                --password-stdin
+                """
+            }
+        }
+
+        stage('Push Docker Image') {
+            steps {
+                sh """
+                docker push ${DOCKERHUB_USERNAME}/${IMAGE_NAME}:${BUILD_NUMBER}
+                docker push ${DOCKERHUB_USERNAME}/${IMAGE_NAME}:latest
+                """
+            }
+        }
+
+        stage('Deploy to AWS EC2') {
+
+            steps {
+
+                sshagent(credentials: [SSH_CREDENTIALS]) {
+
+                    sh """
+                    ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} << EOF
+
+                    docker pull ${DOCKERHUB_USERNAME}/${IMAGE_NAME}:latest
+
+                    docker stop ${CONTAINER_NAME} || true
+
+                    docker rm ${CONTAINER_NAME} || true
+
+                    docker run -d \
+                        --name ${CONTAINER_NAME} \
+                        --restart always \
+                        -p 5000:5000 \
+                        -e APP_NAME='CI/CD Demo' \
+                        -e APP_VERSION='1.0.${BUILD_NUMBER}' \
+                        -e BUILD_NUMBER='${BUILD_NUMBER}' \
+                        -e GIT_COMMIT='${GIT_COMMIT}' \
+                        -e DEPLOY_ENV='Production' \
+                        ${DOCKERHUB_USERNAME}/${IMAGE_NAME}:latest
+
+                    EOF
+                    """
+                }
+            }
+        }
+
+        stage('Health Check') {
+
+            steps {
+
+                sshagent(credentials: [SSH_CREDENTIALS]) {
+
+                    sh """
+                    ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} '
+
+                    sleep 15
+
+                    curl --fail http://localhost:5000/health
+
+                    '
+                    """
+                }
+            }
+        }
+
+        stage('Cleanup Local Images') {
+            steps {
+                sh '''
+                    docker image prune -f
+                '''
+            }
+        }
+    }
+
+    post {
+
+        success {
+
+            echo "Deployment Successful"
+
+            sh '''
+                docker images
+                docker ps
+            '''
+        }
+
+        failure {
+
+            echo "Pipeline Failed"
+
+            sh '''
+                docker ps -a
+            '''
+        }
+
+        always {
+
+            cleanWs()
+
+            echo "Workspace Cleaned"
+        }
+    }
+}
