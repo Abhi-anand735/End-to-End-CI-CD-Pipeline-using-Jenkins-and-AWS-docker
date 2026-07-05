@@ -54,6 +54,15 @@ pipeline {
             }
         }
 
+        stage('SonarQube Analysis') {
+            steps {
+                 withSonarQubeEnv('SonarQube') {
+                 sh '''
+                 sonar-scanner
+                 '''
+            }   
+        }
+
         stage('Run Tests') {
             steps {
                 sh '''
