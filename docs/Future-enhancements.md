@@ -1,0 +1,4 @@
+- Deploy the application to a Kubernetes cluster using Deployment and Service manifests instead of a single Docker container.
+- Use Terraform to provision AWS infrastructure.
+- Use Trivy to scan the vulnerabilities in image .
+- Use the Automated Testing before deployment such as integration testing , unit testing.
