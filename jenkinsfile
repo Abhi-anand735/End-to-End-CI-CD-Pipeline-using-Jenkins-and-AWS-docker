@@ -1,12 +1,6 @@
 pipeline {
     agent any
 
-    options {
-        timestamps()
-        ansiColor('xterm')
-        buildDiscarder(logRotator(numToKeepStr: '20'))
-    }
-
     environment {
 
         // Docker Hub
@@ -102,20 +96,13 @@ pipeline {
         }
 
         stage('Deploy to AWS EC2') {
-
             steps {
-
                 sshagent(credentials: [SSH_CREDENTIALS]) {
-
                     sh """
                     ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} << EOF
-
                     docker pull ${DOCKERHUB_USERNAME}/${IMAGE_NAME}:latest
-
                     docker stop ${CONTAINER_NAME} || true
-
                     docker rm ${CONTAINER_NAME} || true
-
                     docker run -d \
                         --name ${CONTAINER_NAME} \
                         --restart always \
@@ -126,7 +113,6 @@ pipeline {
                         -e GIT_COMMIT='${GIT_COMMIT}' \
                         -e DEPLOY_ENV='Production' \
                         ${DOCKERHUB_USERNAME}/${IMAGE_NAME}:latest
-
                     EOF
                     """
                 }
@@ -134,18 +120,12 @@ pipeline {
         }
 
         stage('Health Check') {
-
             steps {
-
                 sshagent(credentials: [SSH_CREDENTIALS]) {
-
                     sh """
                     ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} '
-
                     sleep 15
-
                     curl --fail http://localhost:5000/health
-
                     '
                     """
                 }
@@ -162,30 +142,21 @@ pipeline {
     }
 
     post {
-
         success {
-
             echo "Deployment Successful"
-
             sh '''
                 docker images
                 docker ps
             '''
         }
-
         failure {
-
             echo "Pipeline Failed"
-
             sh '''
                 docker ps -a
             '''
         }
-
         always {
-
             cleanWs()
-
             echo "Workspace Cleaned"
         }
     }
